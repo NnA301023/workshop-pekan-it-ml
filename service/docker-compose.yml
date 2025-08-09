@@ -1,0 +1,84 @@
+version: '3.8'
+
+services:
+  # Iris ML Service
+  iris-ml-service:
+    build: .
+    container_name: iris-ml-service
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./models:/app/models
+      - ./logs:/app/logs
+    environment:
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=INFO
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - iris-network
+
+  # Model Training Service
+  model-trainer:
+    build: .
+    container_name: iris-model-trainer
+    command: ["python", "trainer/train_model.py"]
+    volumes:
+      - ./models:/app/models
+      - ./logs:/app/logs
+    environment:
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=INFO
+    profiles:
+      - training
+    networks:
+      - iris-network
+
+  # Load Testing with Locust
+  locust:
+    build: .
+    container_name: iris-load-tester
+    command: ["locust", "-f", "load_tests/locustfile.py", "--host", "http://iris-ml-service:8000"]
+    ports:
+      - "8089:8089"
+    volumes:
+      - ./load_tests:/app/load_tests
+      - ./logs:/app/logs
+    environment:
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      - iris-ml-service
+    profiles:
+      - load-testing
+    networks:
+      - iris-network
+
+  # Nginx Reverse Proxy (Optional)
+  nginx:
+    image: nginx:alpine
+    container_name: iris-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - iris-ml-service
+    profiles:
+      - production
+    networks:
+      - iris-network
+
+networks:
+  iris-network:
+    driver: bridge
+
+volumes:
+  models:
+    driver: local
+  logs:
+    driver: local
